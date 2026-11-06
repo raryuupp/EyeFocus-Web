@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EyeFocus-Assist | Sprint 1 - Day 2</title>
+    
+    <!-- 引入 MediaPipe 的核心依赖库 (通过 CDN) -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background-color: #121212;
+            color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+
+        .video-wrapper {
+            position: relative;
+            width: 640px;
+            height: 480px;
+            background-color: #000;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+            border: 2px solid #333;
+        }
+
+        /* 视频和画布叠加在一起 */
+        #webcam, #output_canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* 镜像翻转 */
+        }
+
+        /* 画布默认在视频上方 */
+        #output_canvas {
+            z-index: 10;
+        }
+
+        #status {
+            margin-top: 20px;
+            font-weight: bold;
+            color: #4CAF50;
+        }
+    </style>
+</head>
+<body>
+    <h1>EyeFocus-Assist</h1>
+    <div class="subtitle">Sprint 1 - Day 2: 面部特征点提取 (Face Mesh)</div>
+    
+    <div id="status">正在加载 AI 模型，请稍候...</div>
+
+    <div class="video-wrapper">
+        <!-- 原始视频流 (隐藏起来，主要用 canvas 显示) -->
+        <video id="webcam" autoplay playsinline muted style="visibility: hidden;"></video>
+        <!-- 用于绘制视频和网格的画布 -->
+        <canvas id="output_canvas" width="640" height="480"></canvas>
+    </div>
+
+    <script>
+        const videoElement = document.getElementById('webcam');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const statusElement = document.getElementById('status');
+
+        // 1. 初始化 MediaPipe Face Mesh 模型
+        const faceMesh = new FaceMesh({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+        }});
+
+        faceMesh.setOptions({
+            maxNumFaces: 1,           // 最多识别 1 张脸（减少算力）
+            refineLandmarks: true,    // 关键：开启虹膜（眼睛中心）精细检测
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        // 2. 当模型处理完一帧画面后，会回调这个函数
+        faceMesh.onResults(onResults);
+
+        // 3. 处理结果的绘制逻辑
+        function onResults(results) {
+            // 清空画布
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+            // 把摄像头画面画到 canvas 上
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            // 如果检测到了人脸特征点
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                const landmarks = results.multiFaceLandmarks[0];
+
+                // 使用官方工具绘制面部网格（绿色的线）
+                drawConnectors(canvasCtx, landmarks, FACEMESH_TESSELATION,
+                    {color: '#C0C0C070', lineWidth: 1});
+                // 绘制眼睛和虹膜的轮廓（红色的线）
+                drawConnectors(canvasCtx, landmarks, FACEMESH_RIGHT_IRIS, {color: '#FF3030', lineWidth: 1});
+                drawConnectors(canvasCtx, landmarks, FACEMESH_LEFT_IRIS, {color: '#FF3030', lineWidth: 1});
+
+                // 获取虹膜中心的坐标点 (MediaPipe 定义: 左眼 468, 右眼 473)
+                const leftIris = landmarks[468];
+                const rightIris = landmarks[473];
+
+                // 在控制台打印这两个点的坐标（这就是我们后面要用的数据！）
+                if (Math.random() < 0.05) { // 降低打印频率，防止控制台卡死
+                    console.log(`左眼虹膜: X=${leftIris.x.toFixed(3)}, Y=${leftIris.y.toFixed(3)}`);
+                    console.log(`右眼虹膜: X=${rightIris.x.toFixed(3)}, Y=${rightIris.y.toFixed(3)}`);
+                }
+                
+                statusElement.innerText = "✅ AI 识别中，请查看面部网格";
+            } else {
+                statusElement.innerText = "⚠️ 未检测到人脸，请正对屏幕";
+            }
+            canvasCtx.restore();
+        }
+
+        // 4. 启动摄像头并将每一帧传给模型
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await faceMesh.send({image: videoElement});
+            },
+            width: 640,
+            height: 480
+        });
+
+        // 启动
+        camera.start().then(() => {
+            statusElement.innerText = "✅ 摄像头已启动，正在初始化 AI 模型...";
+        }).catch(err => {
+            statusElement.innerText = "❌ 摄像头启动失败";
+            console.error(err);
+        });
+    </script>
+</body>
+</html>

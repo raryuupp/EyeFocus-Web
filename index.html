@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EyeFocus-Assist | 视线辅助阅读系统</title>
+    <!-- 引入外部 CSS -->
+    <link rel="stylesheet" href="style.css">
+    
+    <!-- 引入 MediaPipe 依赖 -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+</head>
+<body>
+    <button id="reset-btn" class="btn-reset">重新标定</button>
+
+    <div id="cursor-box"></div>
+
+    <div id="dot-0" class="calibration-dot" style="top: 5%; left: 5%;"></div>
+    <div id="dot-1" class="calibration-dot" style="top: 5%; left: 95%;"></div>
+    <div id="dot-2" class="calibration-dot" style="top: 95%; left: 95%;"></div>
+    <div id="dot-3" class="calibration-dot" style="top: 95%; left: 5%;"></div>
+
+    <div class="text-container">
+        <div class="text-line">这是第一行测试文本。代码已经完成了模块化重构，更加清晰。</div>
+        <div class="text-line">这是第二行测试文本。现在我们可以很轻松地向这个项目中添加新功能。</div>
+        <div class="text-line">这是第三行测试文本。你可以准备把它上传到 GitHub 了。</div>
+        <div class="text-line">这是第四行测试文本。这就叫工程化规范！</div>
+    </div>
+
+    <div id="instruction">
+        <h1>准备开始标定</h1>
+        <button id="start-btn">开始标定</button>
+    </div>
+
+    <div class="video-wrapper pos-top-right" id="video-container">
+        <video id="webcam" autoplay playsinline muted style="visibility: hidden;"></video>
+        <canvas id="output_canvas" width="320" height="240"></canvas>
+    </div>
+
+    <!-- 引入外部 JS -->
+    <script src="app.js"></script>
+</body>
+</html>

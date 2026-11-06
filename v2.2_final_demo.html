@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EyeFocus-Assist | v2.2 - 免标定与防闪烁版</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+
+    <style>
+        body { margin: 0; padding: 0; background-color: #121212; color: #fff; font-family: sans-serif; overflow: hidden; }
+        
+        #cursor-box {
+            position: absolute; width: 800px; height: 40px;
+            background-color: rgba(255, 235, 59, 0.2); border: 2px solid rgba(255, 235, 59, 0.8); border-radius: 6px;
+            pointer-events: none; transform: translate(-50%, -50%); display: none; z-index: 9999;
+            /* 加入 CSS 过渡，让跳跃更平滑 */
+            transition: top 0.15s ease-out;
+        }
+
+        .text-container { max-width: 800px; margin: 100px auto; font-size: 20px; line-height: 2.5; color: #aaa; }
+        .text-line { margin-bottom: 20px; padding: 10px; }
+
+        .video-wrapper { position: fixed; bottom: 10px; right: 10px; width: 320px; height: 240px; background-color: #000; border-radius: 8px; overflow: hidden; border: 2px solid #333; z-index: 100; transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1); }
+        .pos-top-right { top: 10px; right: 10px; bottom: auto; }
+        .pos-bottom-right { bottom: 10px; right: 10px; top: auto; }
+        .pos-bottom-left { bottom: 10px; left: 10px; top: auto; right: auto; }
+        .pos-top-left { top: 10px; left: 10px; bottom: auto; right: auto; }
+
+        #webcam, #output_canvas { position: absolute; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+        .calibration-dot { position: absolute; width: 30px; height: 30px; background-color: red; border-radius: 50%; display: none; box-shadow: 0 0 15px red; transform: translate(-50%, -50%); z-index: 10; animation: pulse 1s infinite alternate; }
+        @keyframes pulse { from { transform: translate(-50%, -50%) scale(1); } to { transform: translate(-50%, -50%) scale(1.5); } }
+        
+        #instruction { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 24px; text-align: center; z-index: 20; background: rgba(0,0,0,0.85); padding: 40px; border-radius: 12px; box-shadow: 0 0 30px rgba(0,0,0,0.5); }
+        button { margin-top: 20px; padding: 10px 20px; font-size: 16px; cursor: pointer; background-color: #4CAF50; color: white; border: none; border-radius: 5px; transition: background 0.2s;}
+        button:hover { background-color: #45a049; }
+        .btn-reset { background-color: #f44336; position: absolute; top: 20px; left: 20px; z-index: 999; display: none;}
+        .btn-reset:hover { background-color: #da190b; }
+    </style>
+</head>
+<body>
+    <!-- 重置标定按钮 -->
+    <button id="reset-btn" class="btn-reset">重新标定</button>
+
+    <div id="cursor-box"></div>
+
+    <div id="dot-0" class="calibration-dot" style="top: 5%; left: 5%;"></div>
+    <div id="dot-1" class="calibration-dot" style="top: 5%; left: 95%;"></div>
+    <div id="dot-2" class="calibration-dot" style="top: 95%; left: 95%;"></div>
+    <div id="dot-3" class="calibration-dot" style="top: 95%; left: 5%;"></div>
+
+    <div class="text-container">
+        <div class="text-line">这是第一行测试文本。引入了防闪烁逻辑后，光标不会再乱跳了。</div>
+        <div class="text-line">这是第二行测试文本。你需要把视线停留在这一行超过0.25秒，高亮才会跟过来。</div>
+        <div class="text-line">这是第三行测试文本。系统已经记住了你的黄金参数，下次刷新不需要标定了。</div>
+        <div class="text-line">这是第四行测试文本。按 F5 刷新页面，看看是否直接生效了？</div>
+    </div>
+
+    <div id="instruction">
+        <h1>准备开始标定</h1>
+        <button id="start-btn">开始标定</button>
+    </div>
+
+    <div class="video-wrapper pos-top-right" id="video-container">
+        <video id="webcam" autoplay playsinline muted style="visibility: hidden;"></video>
+        <canvas id="output_canvas" width="320" height="240"></canvas>
+    </div>
+
+    <script>
+        // 固化黄金参数
+        const CENTER_HEAD_WEIGHT = 0.51; 
+        const EDGE_HEAD_WEIGHT = 0.58; 
+        const EYE_GAIN = 2.0; 
+        const EMA_SMOOTHING = 0.9; 
+        
+        // 停留判定时间 (毫秒)
+        const DWELL_TIME_MS = 250; 
+
+        const STORAGE_KEY = 'eyeFocusCalibrationV1';
+
+        const videoElement = document.getElementById('webcam');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const startBtn = document.getElementById('start-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const instruction = document.getElementById('instruction');
+        const videoContainer = document.getElementById('video-container'); 
+        const cursorBox = document.getElementById('cursor-box');
+        const textLines = Array.from(document.querySelectorAll('.text-line'));
+
+        let isCalibrating = false;
+        let currentDotIndex = 0;
+        let isCollecting = false; 
+        let isTrackingActive = false; 
+        
+        const dots = [document.getElementById('dot-0'), document.getElementById('dot-1'), document.getElementById('dot-2'), document.getElementById('dot-3')];
+        const calibrationData = {};
+
+        let minHeadX = 0, maxHeadX = 1, minHeadY = 0, maxHeadY = 1;
+        let minEyeX = 0, maxEyeX = 1, minEyeY = 0, maxEyeY = 1;
+
+        let currentCursorX = window.innerWidth / 2;
+        let currentCursorY = window.innerHeight / 2;
+
+        // 防闪烁状态变量
+        let currentActiveLineIndex = -1;
+        let dwellStartTime = null;
+
+        const faceMesh = new FaceMesh({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`});
+        faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+        faceMesh.onResults(onResults);
+
+        // 页面加载时，检查是否已有标定数据
+        window.addEventListener('DOMContentLoaded', () => {
+            const savedData = localStorage.getItem(STORAGE_KEY);
+            if (savedData) {
+                const data = JSON.parse(savedData);
+                minHeadX = data.minHeadX; maxHeadX = data.maxHeadX;
+                minHeadY = data.minHeadY; maxHeadY = data.maxHeadY;
+                minEyeX = data.minEyeX; maxEyeX = data.maxEyeX;
+                minEyeY = data.minEyeY; maxEyeY = data.maxEyeY;
+                
+                console.log("✅ 已从缓存加载标定数据");
+                startTracking(); // 直接开启追踪，跳过标定
+            }
+        });
+
+        function onResults(results) {
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                const landmarks = results.multiFaceLandmarks[0];
+                drawConnectors(canvasCtx, landmarks, FACEMESH_TESSELATION, {color: '#C0C0C070', lineWidth: 1});
+
+                const noseTip = landmarks[1];
+                const headX = noseTip.x;
+                const headY = noseTip.y;
+                
+                const eyeX = (landmarks[468].x + landmarks[473].x) / 2;
+                const eyeY = (landmarks[468].y + landmarks[473].y) / 2;
+
+                if (isCalibrating && isCollecting && currentDotIndex < 4) {
+                    if (!calibrationData[currentDotIndex]) calibrationData[currentDotIndex] = [];
+                    if (calibrationData[currentDotIndex].length < 90) {
+                        calibrationData[currentDotIndex].push({hX: headX, hY: headY, eX: eyeX, eY: eyeY});
+                    } else {
+                        dots[currentDotIndex].style.display = 'none';
+                        currentDotIndex++;
+                        if (currentDotIndex < 4) showNextDot();
+                        else finishCalibration();
+                    }
+                }
+
+                if (isTrackingActive) {
+                    // 归一化计算
+                    let normHeadX = Math.max(0, Math.min(1, (headX - minHeadX) / (maxHeadX - minHeadX)));
+                    let normHeadY = Math.max(0, Math.min(1, (headY - minHeadY) / (maxHeadY - minHeadY)));
+                    
+                    let rawEyeX = (eyeX - minEyeX) / (maxEyeX - minEyeX);
+                    let rawEyeY = (eyeY - minEyeY) / (maxEyeY - minEyeY);
+                    
+                    let normEyeX = Math.max(0, Math.min(1, (rawEyeX - 0.5) * EYE_GAIN + 0.5));
+                    let normEyeY = Math.max(0, Math.min(1, (rawEyeY - 0.5) * EYE_GAIN + 0.5));
+
+                    let deviationX = Math.abs(normHeadX - 0.5) * 2; 
+                    let deviationY = Math.abs(normHeadY - 0.5) * 2;
+
+                    let currentHeadWeightX = CENTER_HEAD_WEIGHT * (1 - deviationX) + EDGE_HEAD_WEIGHT * deviationX;
+                    let currentHeadWeightY = CENTER_HEAD_WEIGHT * (1 - deviationY) + EDGE_HEAD_WEIGHT * deviationY;
+
+                    let currentEyeWeightX = 1.0 - currentHeadWeightX;
+                    let currentEyeWeightY = 1.0 - currentHeadWeightY;
+
+                    let finalNormX = 1 - (normHeadX * currentHeadWeightX + normEyeX * currentEyeWeightX);
+                    let finalNormY = normHeadY * currentHeadWeightY + normEyeY * currentEyeWeightY;
+
+                    let targetX = finalNormX * window.innerWidth;
+                    let targetY = finalNormY * window.innerHeight;
+
+                    currentCursorX = currentCursorX * EMA_SMOOTHING + targetX * (1.0 - EMA_SMOOTHING);
+                    currentCursorY = currentCursorY * EMA_SMOOTHING + targetY * (1.0 - EMA_SMOOTHING);
+
+                    // ==========================================
+                    // 🔥 行级吸附与迟滞防闪烁逻辑 🔥
+                    // ==========================================
+                    let targetLineIndex = -1;
+                    let minDistance = Infinity;
+
+                    // 1. 找出距离当前视线最近的行
+                    textLines.forEach((line, index) => {
+                        const rect = line.getBoundingClientRect();
+                        const lineCenterY = rect.top + rect.height / 2;
+                        const distance = Math.abs(currentCursorY - lineCenterY);
+
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                            targetLineIndex = index;
+                        }
+                    });
+
+                    // 2. 迟滞判断（Dwell Time）
+                    if (targetLineIndex !== -1) {
+                        if (targetLineIndex === currentActiveLineIndex) {
+                            // 如果还在当前行，重置计时器
+                            dwellStartTime = null; 
+                        } else {
+                            // 视线移到了新行，开始计时
+                            if (dwellStartTime === null) {
+                                dwellStartTime = performance.now();
+                            } else if (performance.now() - dwellStartTime > DWELL_TIME_MS) {
+                                // 停留时间超过 250ms，正式触发跳行
+                                currentActiveLineIndex = targetLineIndex;
+                                dwellStartTime = null; 
+                            }
+                        }
+
+                        // 3. 渲染：始终跟随 currentActiveLine
+                        if (currentActiveLineIndex !== -1) {
+                            const activeLineRect = textLines[currentActiveLineIndex].getBoundingClientRect();
+                            cursorBox.style.left = `50%`;
+                            cursorBox.style.top = `${activeLineRect.top + activeLineRect.height / 2}px`;
+                        }
+                    }
+                }
+            }
+            canvasCtx.restore();
+        }
+
+        function startTracking() {
+            instruction.style.display = 'none';
+            resetBtn.style.display = 'block'; // 显示重置按钮
+            cursorBox.style.display = 'block';
+            setWindowPosition('pos-bottom-right'); 
+            isTrackingActive = true;
+        }
+
+        function finishCalibration() {
+            isCalibrating = false;
+
+            const hXs = [], hYs = [], eXs = [], eYs = [];
+            for(let i=0; i<4; i++) {
+                let sumHX = 0, sumHY = 0, sumEX = 0, sumEY = 0;
+                calibrationData[i].forEach(p => { sumHX += p.hX; sumHY += p.hY; sumEX += p.eX; sumEY += p.eY; });
+                hXs.push(sumHX/90); hYs.push(sumHY/90); eXs.push(sumEX/90); eYs.push(sumEY/90);
+            }
+
+            const padding = 0.1; 
+            minHeadX = Math.min(...hXs) - padding * (Math.max(...hXs) - Math.min(...hXs) + 0.01);
+            maxHeadX = Math.max(...hXs) + padding * (Math.max(...hXs) - Math.min(...hXs) + 0.01);
+            minHeadY = Math.min(...hYs) - padding * (Math.max(...hYs) - Math.min(...hYs) + 0.01);
+            maxHeadY = Math.max(...hYs) + padding * (Math.max(...hYs) - Math.min(...hYs) + 0.01);
+
+            minEyeX = Math.min(...eXs) - padding * (Math.max(...eXs) - Math.min(...eXs) + 0.01);
+            maxEyeX = Math.max(...eXs) + padding * (Math.max(...eXs) - Math.min(...eXs) + 0.01);
+            minEyeY = Math.min(...eYs) - padding * (Math.max(...eYs) - Math.min(...eYs) + 0.01);
+            maxEyeY = Math.max(...eYs) + padding * (Math.max(...eYs) - Math.min(...eYs) + 0.01);
+
+            // 🔥 保存到 LocalStorage
+            const calibrationCache = {
+                minHeadX, maxHeadX, minHeadY, maxHeadY,
+                minEyeX, maxEyeX, minEyeY, maxEyeY
+            };
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(calibrationCache));
+            console.log("✅ 标定数据已保存至缓存");
+
+            startTracking();
+        }
+
+        function setWindowPosition(positionClass) { videoContainer.className = `video-wrapper ${positionClass}`; }
+
+        function showNextDot() {
+            isCollecting = false; 
+            dots[currentDotIndex].style.display = 'block';
+            calibrationData[currentDotIndex] = []; 
+            if (currentDotIndex === 0) setWindowPosition('pos-top-right');
+            if (currentDotIndex === 1) setWindowPosition('pos-bottom-right');
+            if (currentDotIndex === 2) setWindowPosition('pos-bottom-left');
+            if (currentDotIndex === 3) setWindowPosition('pos-top-left');
+            
+            setTimeout(() => { if(isCalibrating) isCollecting = true; }, 1000);
+        }
+
+        const camera = new Camera(videoElement, { onFrame: async () => { await faceMesh.send({image: videoElement}); }, width: 320, height: 240 });
+        camera.start();
+
+        startBtn.addEventListener('click', () => {
+            instruction.style.display = 'none';
+            isCalibrating = true;
+            currentDotIndex = 0;
+            setWindowPosition('pos-top-right');
+            showNextDot(); 
+        });
+
+        // 清除缓存并重新标定
+        resetBtn.addEventListener('click', () => {
+            localStorage.removeItem(STORAGE_KEY);
+            location.reload();
+        });
+    </script>
+</body>
+</html>

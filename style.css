@@ -1,0 +1,31 @@
+body { margin: 0; padding: 0; background-color: #121212; color: #fff; font-family: sans-serif; overflow: hidden; }
+
+#cursor-box {
+    position: absolute; width: 800px; height: 40px;
+    background-color: rgba(255, 235, 59, 0.2); border: 2px solid rgba(255, 235, 59, 0.8); border-radius: 6px;
+    pointer-events: none; transform: translate(-50%, -50%); display: none; z-index: 9999;
+    transition: top 0.15s ease-out;
+}
+
+.text-container { max-width: 800px; margin: 100px auto; font-size: 20px; line-height: 2.5; color: #aaa; }
+.text-line { margin-bottom: 20px; padding: 10px; }
+
+.video-wrapper { position: fixed; bottom: 10px; right: 10px; width: 320px; height: 240px; background-color: #000; border-radius: 8px; overflow: hidden; border: 2px solid #333; z-index: 100; transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1); }
+
+.pos-top-right { top: 10px; right: 10px; bottom: auto; }
+.pos-bottom-right { bottom: 10px; right: 10px; top: auto; }
+.pos-bottom-left { bottom: 10px; left: 10px; top: auto; right: auto; }
+.pos-top-left { top: 10px; left: 10px; bottom: auto; right: auto; }
+
+#webcam, #output_canvas { position: absolute; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+
+.calibration-dot { position: absolute; width: 30px; height: 30px; background-color: red; border-radius: 50%; display: none; box-shadow: 0 0 15px red; transform: translate(-50%, -50%); z-index: 10; animation: pulse 1s infinite alternate; }
+@keyframes pulse { from { transform: translate(-50%, -50%) scale(1); } to { transform: translate(-50%, -50%) scale(1.5); } }
+
+#instruction { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 24px; text-align: center; z-index: 20; background: rgba(0,0,0,0.85); padding: 40px; border-radius: 12px; box-shadow: 0 0 30px rgba(0,0,0,0.5); }
+
+button { margin-top: 20px; padding: 10px 20px; font-size: 16px; cursor: pointer; background-color: #4CAF50; color: white; border: none; border-radius: 5px; transition: background 0.2s;}
+button:hover { background-color: #45a049; }
+
+.btn-reset { background-color: #f44336; position: absolute; top: 20px; left: 20px; z-index: 999; display: none;}
+.btn-reset:hover { background-color: #da190b; }
