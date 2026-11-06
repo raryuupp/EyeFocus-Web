@@ -1,7 +1,8 @@
-👁️ EyeFocus-Assist - 纯软件级视线追踪辅助阅读系统
-https://img.shields.io/badge/Status-MVP%20Complete-brightgreen
-https://img.shields.io/badge/Tech-WebRTC%20%7C%20MediaPipe%20%7C%20JavaScript-blue
-https://img.shields.io/badge/Algorithm-Head--Eye%20Fusion-orange
+# 👁️ EyeFocus-Assist - 纯软件级视线追踪辅助阅读系统
+
+![Status](https://img.shields.io/badge/Status-MVP%20Complete-brightgreen)
+![Tech](https://img.shields.io/badge/Tech-WebRTC%20%7C%20MediaPipe%20%7C%20JavaScript-blue)
+![Algorithm](https://img.shields.io/badge/Algorithm-Head--Eye%20Fusion-orange)
 
 📖 项目简介
 EyeFocus-Assist 是一款基于 Web 端的轻量级辅助阅读工具。针对长时间在电脑前阅读或输入人群容易产生的“阅读串行”和“视觉疲劳”痛点，本项目利用普通网络摄像头（无需任何昂贵的专业眼动仪硬件），通过纯前端技术实现了实时的视线追踪与行级阅读高亮辅助。
